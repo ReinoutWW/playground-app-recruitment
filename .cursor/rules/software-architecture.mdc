@@ -1,0 +1,327 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Software Architecture Document
+
+**Project:** Recruiter Platform (Internal‑Use)
+**Version:** 1.1 (June 28 2025)
+**Author:** Laurens – Solution Architect
+
+---
+
+## Table of Contents
+
+1. Purpose
+2. Product Vision & Scope
+3. Quality Attributes
+4. Technology Stack Summary
+5. Architectural Overview
+6. Front-End Architecture (React + Vite)
+7. Back-End Architecture (.NET)
+8. Data & Integration Design
+9. Cross-Cutting Concerns
+10. Coding Principles & Guidelines
+11. Dev & DevOps Workflows
+12. Testing Strategy
+13. Security & Compliance
+14. Observability & Maintenance
+15. Risks & Mitigations
+16. Appendix
+
+---
+
+## 1. Purpose
+
+This document defines a *lean, purely technical* architecture for an internal recruiter platform. The system offers a *single‑role* user experience (Recruiter) and intentionally omits any candidate‑facing or admin‑facing user interface. All requirements are filtered through **KISS**, **Clean Architecture**, and proven design patterns to keep the codebase maintainable and change‑friendly.
+
+---
+
+## 2. Product Vision & Scope
+
+| Goal                     | Description                                                                         |
+| ------------------------ | ----------------------------------------------------------------------------------- |
+| **Recruiter Experience** | analyse resume of candidates, search filter applicants, applicant quality analysis, |
+
+---
+
+## 3. Quality Attributes
+
+| Attribute           | Target                                                               |
+| ------------------- | -------------------------------------------------------------------- |
+| **Maintainability** | ≤ 25 % average cyclomatic complexity per module; < 5 min build time. |
+| **Scalability**     | 10× traffic growth without code changes (horizontal scaling).        |
+| **Performance**     | < 200 ms P95 API latency; Time‑to‑interactive < 2 s on 4G.           |
+| **Security**        | OWASP ASVS L2 compliance; GDPR & ISO 27001 alignment.                |
+| **Availability**    | 99.9 % monthly uptime.                                               |
+
+---
+
+## 4. Technology Stack Summary
+
+| Layer              | Tooling                                                   | Rationale                                                         |
+| ------------------ | --------------------------------------------------------- | ----------------------------------------------------------------- |
+| **UI**             | React 18, Vite 5, TypeScript 5, Tailwind CSS, Headless UI | Fast HMR ⚡, typed front‑end, small bundle, accessible components. |
+| **State & Data**   | TanStack Query, Zod for runtime schema, WebSockets        | Declarative caching, type‑safe API contracts, real‑time updates.  |
+| **API**            | ASP.NET 9 Minimal APIs, MediatR, AutoMapper               | Lightweight, pipeline behaviors, clear separation of concerns.    |
+| **Domain/Core**    | .NET 9, C# 13, DDD‑style entities & VOs                   | Expressive domain language, strong typing.                        |
+| **Infrastructure** | PostgreSQL 16, EF Core 9 (code‑first), Redis 7            | Relational integrity + caching.                                   |
+|                    |                                                           |                                                                   |
+| **CI/CD**          | GitHub Actions → Docker                                   | Cloud‑native, Blue/Green deploys out‑of‑the‑box.                  |
+| **Monitoring**     | OpenTelemetry → Grafana & Loki                            | Unified tracing, metrics, logging.                                |
+
+---
+
+## 5. Architectural Overview
+
+```
++---------+        HTTPS         +-------------------+
+| React   |  ↔  ASP.NET / BFF  ↔ |   Domain + App    |
+| SPA     |    (Ports layer)     | (Core, Services)  |
++---------+                      +---------+---------+
+                                       ↕
+                                 Infrastructure
+                                       ↕
+                         PostgreSQL ─ Redis
+```
+
+**Clean Architecture Rings**
+
+```
+┌─────────┐   Entities / VOs           (Core)
+│  Core   │
+├─────────┤   Application Services     (Use‑Cases)
+│  App    │
+├─────────┤   Adapters & Gateways      (Infra)
+│ Infra   │
+└─────────┘   Framework & Drivers      (Web/API)
+```
+
+---
+
+## 6. Front‑End Architecture
+
+### 6.1 Project Layout
+
+```
+src/
+ ├─ app/            // TanStack Router routes + loaders
+ ├─ features/
+ │    ├─ jobs/      // Job postings management
+ │    ├─ candidates/ // Candidate database, pipeline views
+ │    └─ notes/
+ ├─ shared/
+ └─ main.tsx
+```
+
+### 6.2 Key Decisions
+
+* **Internal‑only UI** – Access controlled via organisation SSO; no public routes.
+* **Functional Components + Hooks** – No legacy classes.
+* **Atomic / Utility‑first CSS (Tailwind)** – Eliminates ad‑hoc CSS sprawl.
+* **TanStack Query** – Built‑in caching, optimistic updates, avoids global state abuse.
+* **Form Validation** – React‑Hook‑Form + Zod resolver: type‑safe and performant.
+
+### 6.3 Patterns Applied
+
+| Concern               | Pattern                                       | Benefit                                                              |
+| --------------------- | --------------------------------------------- | -------------------------------------------------------------------- |
+| Dependency management | **Module Federation (Vite’s dynamic import)** | Potential future micro‑frontend separation (e.g., analytics module). |
+| UI composition        | **Compound Component**                        | Flexible, controlled UI parts (e.g., multi‑step wizard).             |
+| State                 | **Observer (React state)**                    | Automatic UI refresh on data changes.                                |
+| Cross‑cutting         | **HOC / Render‑Props → Strategy**             | Replace behaviours (e.g., feature flags).                            |
+
+---
+
+## 7. Back‑End Architecture
+
+### 7.1 Layered Clean Architecture
+
+| Layer              | Responsibility                              | Tech                                   |
+| ------------------ | ------------------------------------------- | -------------------------------------- |
+| **Core**           | Entities, Value Objects, Domain Events      | Pure C#                                |
+| **Application**    | Use‑Cases, DTOs, Interfaces                 | MediatR, FluentValidation              |
+| **Infrastructure** | EF Core, Redis, external services           | Postgres Provider, StackExchange.Redis |
+| **Web / API**      | Minimal API Endpoints (or thin Controllers) | ASP.NET 9                              |
+
+### 7.2 Domain Example
+
+```csharp
+public sealed record JobId(Guid Value);
+
+public class Job : Entity<JobId>, IAggregateRoot
+{
+    private readonly List<Candidate> _candidates = new();
+    public string Title { get; private set; }
+    public DateTimeOffset PublishedAt { get; private set; }
+
+    public void AddCandidate(Candidate candidate)
+    {
+        if (_candidates.Any(c => c.Id == candidate.Id))
+            throw new BusinessRuleException("Already tracked.");
+        _candidates.Add(candidate);
+        AddDomainEvent(new CandidateTrackedDomainEvent(Id, candidate.Id));
+    }
+}
+```
+
+### 7.3 API Composition
+
+* **CQRS Light** – Command requests via MediatR; Queries via TanStack Query‑style endpoints.
+* **OpenAPI First** – Swashbuckle generates JSON; contracts exported to `shared/api` for TypeScript types (NSwag).
+* **Versioning** – URL path (`/api/v1/…`); Sunset header after deprecation.
+
+### 7.4 GoF Patterns in Action
+
+| Scenario                  | Pattern            | Placement                                 |
+| ------------------------- | ------------------ | ----------------------------------------- |
+| Persisting Domain Events  | **Unit of Work**   | EF Core transaction wrapper.              |
+| Mapping between layers    | **Adapter**        | Infrastructure → DTOs.                    |
+| Validation strategies     | **Strategy**       | Screening algorithms.                     |
+| Instantiation of entities | **Factory Method** | Domain static `.Create()` for invariants. |
+| Building complex filters  | **Specification**  | Query objects for dynamic LINQ.           |
+
+---
+
+## 8. Data & Integration Design
+
+| Interface                | Protocol          | Notes                               |
+| ------------------------ | ----------------- | ----------------------------------- |
+| **Client ↔ API**         | REST/HTTPS (JSON) | HTTP/2, compression.                |
+|                          |                   |                                     |
+| **Async tasks**          | RabbitMQ topics   | Fan‑out for email, analytics.       |
+| **3rd‑party CV parsing** | REST              | Adapter layer hides vendor lock‑in. |
+
+---
+
+## 9. Cross‑Cutting Concerns
+
+* **Configuration** – `.en``v` -> docker container
+* **Validation** – FluentValidation pipelines (back‑end); Zod schemas (front‑end).
+* **Error Handling** – Problem Details (RFC 9457).
+* **Logging** – Serilog + structured JSON; front‑end to Sentry via source maps.
+* **Caching** – RFC 7234 for HTTP; Redis for hot datasets.
+* **Internationalisation** – i18next; all strings externalised.
+
+---
+
+## 10. Coding Principles & Guidelines
+
+### 10.1 SOLID Recap
+
+| Principle                 | Concretely in Project                                                                 |
+| ------------------------- | ------------------------------------------------------------------------------------- |
+| **S**ingle Responsibility | Each React hook wraps *one* concern; each C# command handler executes *one* use‑case. |
+| **O**pen/Closed           | Strategy pattern for ranking algorithms.                                              |
+| **L**iskov Substitution   | Base `Entity<TId>` never throws on allowed overrides.                                 |
+| **I**nterface Segregation | `IJobRepository.ReadOnly` vs `IJobRepository.Write`.                                  |
+| **D**ependency Inversion  | Core depends on abstractions only; Infrastructure wires concrete adapters.            |
+
+### 10.2 Clean Code Rules
+
+* Descriptive names (`TrackCandidateHandler`, not `DoStuff`).
+* Limit function bodies to ≤ 20 lines.
+* Guard clauses first; happy path last.
+* No magic numbers; constants/enums.
+
+### 10.3 Clean Architecture Tenets
+
+1. Business rules independent of frameworks.
+2. No outward coupling from inner rings.
+3. UI & DB are *plug‑ins*; can be replaced without touching domain.
+
+### 10.4 Gang of Four Patterns Guide
+
+| Pattern       | Where / Why                                 |
+| ------------- | ------------------------------------------- |
+| **Builder**   | Fluent test data generation.                |
+| **Observer**  | React state + domain events.                |
+| **Decorator** | Logging/metrics pipeline behaviors.         |
+| **Proxy**     | Retry & timeout wrappers for external APIs. |
+| **Facade**    | Aggregate multi‑API calls (BFF).            |
+| **Singleton** | Redis connection multiplexer.               |
+
+### 10.5 KISS Doctrine
+
+> “Make simple things simple, complex things possible.”
+
+* Start with the *simplest* model (CRUD) and evolve toward CQRS/eventing only when KPIs demand it.
+* Default to *convention over configuration* (Vite defaults, ASP.NET minimal APIs).
+* Avoid premature micro‑services; stick to a modular monolith until domain dictates otherwise.
+
+---
+
+## 11. Dev & DevOps Workflows
+
+| Stage             | Step                                              | Tool                                    |
+| ----------------- | ------------------------------------------------- | --------------------------------------- |
+| **PR**            | Lint (ESLint, dotnet‑format) → Unit tests → Build | GitHub Actions                          |
+| **CI**            | `docker build` multi‑stage; SBOM via Trivy        |                                         |
+| **CD**            | Preview → Staging → Prod (Blue/Green)             | GitHub Environments                     |
+| **Infra as Code** | Bicep / Terraform                                 | Versioned infra, self‑service dev envs. |
+
+---
+
+## 12. Testing Strategy
+
+| Level           | Framework                             | Target                                              |
+| --------------- | ------------------------------------- | --------------------------------------------------- |
+| **Unit**        | Vitest / xUnit .net                   | Pure functions, domain logic.                       |
+| **Integration** | Playwright Component / TestContainers | API + DB contracts.                                 |
+| **E2E**         | Playwright                            | Critical user journeys (post job, manage pipeline). |
+| **Contract**    | Pacto                                 | Consumer‑driven mocks.                              |
+| **Load**        | k6                                    | 95th percentile latency < 200 ms.                   |
+
+CI gate: branch must reach 85 % coverage (line) & 100 % critical path features.
+
+---
+
+## 13. Security & Compliance
+
+* **Threat Modeling** – STRIDE kickoff per epic.
+* **Static Analysis** – Dependabot, dotnet‑security‑analysis, Snyk.
+* **Data Protection** – AES‑256 at rest (Postgres TDE), HTTPS/TLS 1.3 in transit.
+* **PII Classification** – Tag columns; automatic encryption for Tier 1 data.
+* **Secure Headers** – CSP, HSTS (max‑age 180 days), X‑Frame‑Options=DENY.
+* **Audit Trail** – Domain events persisted → EventStore.
+
+---
+
+## 14. Observability & Maintenance
+
+| Aspect            | Implementation                                                          |
+| ----------------- | ----------------------------------------------------------------------- |
+| **Tracing**       | OpenTelemetry auto‑instrumentation; W3C TraceContext propagated to SPA. |
+| **Metrics**       | Prometheus exporter (`/metrics`); Dashboards in Grafana.                |
+| **Logs**          | Serilog → Loki; front‑end logs via Sentry.                              |
+| **Health Checks** | `/healthz` & `/ready` endpoints; watched by Azure Front Door.           |
+| **Feature Flags** | Unleash (remote toggles, gradual rollout).                              |
+
+---
+
+## 15. Risks & Mitigations
+
+| Risk                                    | Impact | Likelihood | Mitigation                                                |
+| --------------------------------------- | ------ | ---------- | --------------------------------------------------------- |
+| Team unfamiliar with Clean Architecture | Medium | Medium     | Provide starter template & pair programming.              |
+| Sudden hiring campaign doubling load    | High   | Low → Med  | Autoscale rules + read replicas.                          |
+| Vendor lock‑in (Auth provider)          | Medium | Medium     | Abstraction via OIDC + adapter; fallback identity server. |
+
+---
+
+## 16. Appendix
+
+* **Glossary** – DDD ubiquitous language (Recruiter, Candidate, Job Posting, Application).
+* **Reference Templates** – Starter GitHub repositories:
+
+  * `frontend-template-vite-react-tailwind`
+  * `backend-template-dotnet-clean-architecture`
+* **Learning Path** – Official docs links, concise reading order for SOLID, Clean Code, GoF.
+
+---
+
+### Coding Vision (One‑Sentence Manifesto)
+
+> *“Deliver recruiter‑centric experiences through code that is simple to read, effortless to change, and architecturally robust.”*
+

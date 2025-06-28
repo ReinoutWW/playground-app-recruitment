@@ -1,0 +1,141 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Below is the structured, step-by-step action plan for creating a modern React + Vite interface that fuses glassmorphism and neumorphism inspired by Apple’s Liquid Glass aesthetic. This document is intended for both designers and engineers to refer to during implementation.
+
+---
+
+## 1. UX Strategy & Core Principles
+
+* **Purposeful minimalism**: Surface only essential actions; every pixel must earn its place.
+* **Visual hierarchy through depth**: Use translucency (glass) for backgrounds and soft extrusion (neumorphism) for interactive surfaces.
+* **Contextual adaptability**: Components re-tint and re-light based on light/dark theme and wallpaper hue.
+* **Accessibility first**: Maintain glass blur overlays ≥ 0.6 contrast against underlying content; include a "Reduce blur & motion" toggle tied to `prefers-reduced-motion` and `prefers-contrast`.
+* **Mobile-first responsive grid**: 4 pt baseline grid; 12-column layout on ≥ 640px, single-column below.
+
+---
+
+## 2. Visual Language
+
+### 2.1 Color Palette
+
+Define as CSS variables or extend Tailwind config:
+
+| Token             | Light                       | Dark                    | Usage              |
+| ----------------- | --------------------------- | ----------------------- | ------------------ |
+| `--c-primary`     | #5E9BFF                     | #3A6EFF                 | CTAs, accent icons |
+| `--c-primary-α20` | rgba(94,155,255,0.2)        | rgba(58,110,255,0.2)    | Glass overlays     |
+| `--c-surface`     | #F5F7FA                     | #111418                 | Card backgrounds   |
+| `--c-surface-alt` | #FFFFFF                     | #1A1E24                 | Neumorphic panels  |
+| `--c-stroke`      | #E5E9F0                     | #272B33                 | 1px borders        |
+| `--c-text`        | #0A0C10                     | #F2F5F9                 | Body copy          |
+| `--c-muted`       | #56606D                     | #AEB6C2                 | Secondary text     |
+| Semantic tokens   | (inherited from SF Symbols) | Success, warning, error |                    |
+
+### 2.2 Glassmorphism Rules
+
+* **Background**: `background: var(--c-primary-α20); backdrop-filter: blur(20px) saturate(180%); border:1px solid var(--c-primary-α20); border-radius:24px;`
+* **Layer order**: glass > blur content > wallpaper. Limit to two nested glass layers.
+* **Lighting**: Inner subtle white glow: `box-shadow: inset 0 1px 0 rgba(255,255,255,.35)`.
+
+### 2.3 Neumorphism Rules
+
+* **Dual shadows** for raised elements:
+
+  ```css
+  box-shadow:
+    4px 4px 8px rgba(0,0,0,0.08),
+    -4px -4px 8px rgba(255,255,255,0.6);
+  ```
+* Apply only on interactive controls. Keep text surfaces flat.
+
+---
+
+## 3. Motion & Interaction Guidelines
+
+Use Framer Motion with these patterns:
+
+| Pattern            | Duration | Easing (cubic-bezier) | Notes                         |
+| ------------------ | -------- | --------------------- | ----------------------------- |
+| Micro-hover lift   | 120ms    | .32,.72,.4,1          | translateY(-2px) + brightness |
+| Glass panel in/out | 240ms    | .36,.04,.13,1.05      | scale 95→100% + opacity fade  |
+| Page transition    | 320ms    | .25,.8,.41,1          | slide + cross-fade            |
+| Spring overscroll  | 600ms    | default spring (100)  | For scroll containers         |
+
+Respect `prefers-reduced-motion` by substituting opacity-only fades.
+
+---
+
+## 4. Component & Layout System
+
+* **Design tokens**: Export JSON from Figma to Tailwind's `theme.extend`.
+* **Atomic hierarchy**:
+
+  * **Atoms**: icon button, blurred badge, neumorphic toggle
+  * **Molecules**: glass card, search bar, tab bar
+  * **Organisms**: dashboard widget, settings sheet
+* Use Radix UI primitives wrapped with `@shadcn/ui` for accessibility and styling.
+* **Spacing**: 4pt scale (4, 8, 12, 16, 24, 32, 48, 64).
+* **Grid**: `max-width:1280px`, 24px gutters, auto-flow dense CSS Grid.
+
+---
+
+## 5. Implementation Stack
+
+| Concern      | Tooling                                  | Rationale                          |
+| ------------ | ---------------------------------------- | ---------------------------------- |
+| Build        | Vite                                     | Fast HMR, TypeScript-friendly      |
+| Styling      | Tailwind CSS (JIT)                       | Utility-first, purges dead CSS     |
+| Theming      | CSS variables + data-theme switch        | Runtime tinting                    |
+| Animation    | Motion for React                         | Hardware-accelerated spring API    |
+| State & Data | TanStack Query, Zustand                  | Async & local state                |
+| Docs         | Storybook                                | Live token previews                |
+| QA           | ESLint, Prettier, Stylelint, Axe-Core CI | Maintain quality and accessibility |
+
+Sample GlassCard component:
+
+```jsx
+import { motion } from "motion/react";
+export default function GlassCard({ children }) {
+  return (
+    <motion.div
+      className="rounded-3xl border border-primary/20 bg-primary/20 backdrop-blur-xl shadow-lg p-6"
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.24, ease: [0.36, 0.04, 0.13, 1.05] }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+```
+
+---
+
+## 6. Accessibility, Performance & QA
+
+1. Contrast audit (WCAG AA) in light & dark themes.
+2. Motion audit: ensure `prefers-reduced-motion` fallbacks.
+3. Performance budget: initial JS ≤ 175KB, LCP <2.5s on 3G, measured via Lighthouse.
+4. Keyboard & screen-reader flows tested in Storybook with Axe.
+
+---
+
+## 7. Delivery Roadmap
+
+| Week | Milestone                                                  |
+| ---- | ---------------------------------------------------------- |
+| 1    | Requirements, personas, success metrics                    |
+| 2    | Mood-board & visual explorations                           |
+| 3    | Finalize color & type scales; token JSON & Tailwind config |
+| 4–5  | Build atomic components in Storybook                       |
+| 6    | Integrate first feature slice (dashboard)                  |
+| 7    | Accessibility & performance audits                         |
+| 8    | Beta cut & stakeholder sign-off                            |
+
+---
+
+*Next step:* Scaffold the Vite workspace, import tokens JSON, and create the GlassCard component to begin the living style guide.
+
