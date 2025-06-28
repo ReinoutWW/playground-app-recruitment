@@ -1,0 +1,150 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Folder Structure Reference
+
+**Project:** Recruiter Platform (Internal‑Use)
+**Version:** 1.0 (June 28 2025)
+**Author:** Laurens – Solution Architect
+
+---
+
+## 1  Repository‑Level Layout
+
+```
+repo‑root/
+├── .github/            # CI/CD pipelines (GitHub Actions)
+│   └── workflows/
+├── docs/               # ADRs, architecture diagrams, hand‑offs
+├── infra/              # IaC (Bicep/Terraform), k8s manifests, Trivy SBOM task
+├── docker/             # Dockerfiles + compose overrides
+├── frontend/           # React + Vite mono‑package
+├── backend/            # .NET Clean Architecture solution
+├── test‑data/          # Seed scripts, JSON fixtures
+└── README.md           # High‑level project intro
+```
+
+> 📌 **Mono‑Repo:** Keeping FE + BE in the same repository simplifies atomic PRs, versioning, and automated CI/CD.
+
+---
+
+## 2  Front‑End Folder Layout (`frontend/`)
+
+```
+frontend/
+├── public/                 # Static assets served directly by Vite
+├── src/
+│   ├── app/                # TanStack Router – entry points & route loaders
+│   ├── features/
+│   │   ├── jobs/           # Job posting CRUD UI
+│   │   │   ├── components/
+│   │   │   ├── hooks/
+│   │   │   ├── api/        # Colocated TanStack Query defs
+│   │   │   └── types.ts
+│   │   ├── candidates/     # Candidate management UI
+│   │   │   ├── components/
+│   │   │   ├── hooks/
+│   │   │   ├── api/
+│   │   │   └── types.ts
+│   │   └── interviews/     # Interview scheduling & pipeline view
+│   │       ├── components/
+│   │       ├── hooks/
+│   │       ├── api/
+│   │       └── types.ts
+│   ├── shared/             # Reusable UI primitives, icons, utils, constants
+│   ├── styles/             # Tailwind base/overrides (if any)
+│   ├── i18n/               # JSON translation resources & config
+│   └── main.tsx            # Vite bootstrap (React 18 root)
+├── tests/
+│   ├── unit/               # Vitest & React Testing Library
+│   └── e2e/                # Playwright specs
+├── vite.config.ts          # Vite + Tailwind + ts‑path‑alias
+└── package.json            # npm scripts, dependencies
+```
+
+**Colocation > Monolith:** Each `features/<name>` slice owns its own components, hooks, and API bindings to reduce cross‑folder navigation.
+
+---
+
+## 3  Back‑End Folder Layout (`backend/`)
+
+```
+backend/
+├── src/
+│   ├── Core/                 # Domain Model (Entities, VOs, Domain Events)
+│   ├── Application/          # Use‑Cases, DTOs, Interfaces, Validators
+│   ├── Infrastructure/       # EF Core, Redis, external service adapters
+│   ├── WebApi/               # ASP.NET Minimal API endpoints, DI wiring
+│   └── SharedKernel/         # Cross‑cutting abstractions (Result, Guard, etc.)
+├── tests/
+│   ├── Unit/                 # xUnit for Core + Application
+│   ├── Integration/          # TestContainers (Postgres, Redis)
+│   └── Api/                  # Playwright API tests / Contract tests
+├── Dockerfile                # Multi‑stage build → distroless
+├── nuget.config              # Private feeds if any
+└── RecruiterPlatform.sln     # Root solution file (glues projects)
+```
+
+### Project‑to‑Project References
+
+```
+Core             ←⎯⎯ Application
+Application      ←⎯⎯ Infrastructure
+Application      ←⎯⎯ WebApi (via DI)
+Core & Application ↔ SharedKernel (utilities)
+```
+
+*Arrow direction = depends on.*  Core remains completely independent of Infrastructure & WebApi, enforcing Clean Architecture.
+
+---
+
+## 4  Infrastructure & DevOps (`infra/`, `docker/`, `.github/`)
+
+| Path                 | Purpose                                                                                           |
+| -------------------- | ------------------------------------------------------------------------------------------------- |
+| `infra/bicep/`       | Azure Container Apps, Postgres Flex Server, Redis Cache, Log Analytics workspace.                 |
+| `infra/terraform/`   | Alternative Terraform variant for multi‑cloud deployments.                                        |
+| `docker/aspnet/`     | Base ASP.NET runtime image with hardened settings.                                                |
+| `docker/postgres/`   | Local dev Postgres + init scripts for CI.                                                         |
+| `.github/workflows/` | *lint‑test‑build.yml*, *docker‑publish.yml*, *deploy‑aca.yml* – PR gating and progressive deploy. |
+
+---
+
+## 5  Test Data & Seeds (`test‑data/`)
+
+```
+test‑data/
+├── sql/
+│   └── seed_postgres.sql   # Non‑prod reference data (countries, stages)
+├── json/
+│   ├── sample_jobs.json
+│   └── sample_candidates.json
+└── README.md               # Loading instructions for local dev
+```
+
+---
+
+## 6  Rationale & Conventions
+
+* **One Feature = One Folder** – Promotes modular monolith approach; eventual extraction to micro‑service is trivial.
+* **Mirrored Tests** – `tests/Unit/<SameStructureAsSrc>` keeps coverage easy to track.
+* **Cross‑Cutting SharedKernel** – Prevents cyclic dependencies while avoiding NuGet sprawl.
+* **IaC Split** – Bicep first‑class in Azure; Terraform kept for portability.
+* **Docker Layering** – Separate *build* and *runtime* images; SBOM generated during build stage.
+
+---
+
+## 7  Next Steps
+
+1. Convert this reference into repo‑scaffold scripts (e.g., `pnpm dlx @antfu/ni`, `dotnet template --install`).
+2. Add ADR‑001 explaining mono‑repo vs poly‑repo decision.
+3. Enforce path‑based ESLint / StyleCop rules to prevent cross‑module leaks.
+
+---
+
+### “A place for everything, and everything in its place.”
+
+The above structure keeps *domain logic, UI, infra, and tests* clearly partitioned, accelerating onboarding and reducing merge conflicts.
+
